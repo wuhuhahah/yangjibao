@@ -1,0 +1,23 @@
+# ── 个人数据：含账号 token、昵称、支付宝账号、完整持仓金额，绝对不要提交 ──
+yjb-data.json
+nav_cache.json
+edge-auto-profile/
+
+# ── 生成物：内容里写死了你的持仓金额与明细 ──
+持仓看板.html
+持仓体检报告.md
+weekly.log
+
+# ── 改造前备份，只在本地留存 ──
+*.bak
+
+# ── WorkBuddy 本地工作数据 ──
+.workbuddy/
+
+# ── 系统与编辑器缓存 ──
+__pycache__/
+*.pyc
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
