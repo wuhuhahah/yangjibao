@@ -1,26 +1,22 @@
 #!/usr/bin/env node
 /**
- * 养基宝插件数据实时读取工具（零依赖，Node >= 22）
+ * 养基宝插件数据读取工具（零依赖，Node >= 22）
  *
- * 原理：Edge 自带 CDP 调试协议。带 --remote-debugging-port 启动 Edge 后，
- * 打开插件 popup 页面作为标签页，在其上下文里执行 chrome.storage.local.get(null)
- * 拿到全量数据 —— 比 LevelDB 离线解析可靠，且是运行时实时数据。
+ * 主路径（默认）：直接解析插件在本地的存储数据库（LevelDB 的 .log 文件）。
+ *   持仓、token、账户数据都是明文 JSON，按 LevelDB 的 WriteBatch 格式解出来即可。
+ *   ★ 不需要关闭 Edge，不需要启动浏览器，秒级完成。
+ *
+ * 兜底路径：若直读失败（.log 被清空 / 数据已 compaction 进 .sst / 文件夹不存在），
+ *   回退到 CDP 方案 —— 把插件存储拷到独立 profile，另起一个 Edge 用
+ *   chrome.storage.local.get(null) 读。这条路要求 Edge 完全退出。
  *
  * 用法：
  *   node yjb.js          读取一次并保存 yjb-data.json
  *   node yjb.js --watch  每 60 秒读一次，持续更新 yjb-data.json
- *
- * 前置条件（很重要）：运行前 Edge 必须完全退出。
- *   新版 Edge 禁止在默认资料目录上开调试端口，所以本脚本的做法是
- *   「把真实 profile 里的插件存储拷到独立目录 → 另起一个 Edge 读」。
- *   这一步是快照式的，不是实时同步：Edge 开着就拷不到，脚本会直接退出。
- *   Edge 开着时请改跑「刷新数据.bat」，它会负责关掉再重开。
- *
- * 生命周期：读完后自己启动的实例会被 Browser.close 关闭，
- *   否则残留实例占着 9222 端口会让下次运行跳过 seed、一直返回旧快照。
  */
 'use strict';
 const fs = require('fs');
+const path = require('path');
 const { execFile, execSync } = require('child_process');
 
 const EXT_ID = 'lkfljjeajaekfbjfbbipopenjjebcphb'; // 养基宝
@@ -50,6 +46,78 @@ const EDGE_PATHS = [
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- 主路径：直接解析插件数据库（Edge 开着也照样读）----------
+function readVarint(buf, pos) {
+  let result = 0, shift = 0;
+  while (pos < buf.length) {
+    const b = buf[pos++];
+    result |= (b & 0x7f) << shift;
+    if (!(b & 0x80)) return [result >>> 0, pos];
+    shift += 7;
+    if (shift > 35) return [null, pos];
+  }
+  return [null, pos];
+}
+
+function parseLogRecords(buf) { // .log → 拼接完整的 WriteBatch 记录
+  const BLOCK = 32768;
+  const out = [];
+  let pos = 0, cur = [];
+  while (pos + 7 <= buf.length) {
+    const off = pos % BLOCK;
+    if (off + 7 > BLOCK) { pos += BLOCK - off; continue; } // 块尾不足 7 字节，跳过填充
+    const len = buf.readUInt16LE(pos + 4);
+    const type = buf[pos + 6]; // 1=FULL 2=FIRST 3=MIDDLE 4=LAST 0=ZERO
+    pos += 7;
+    if (type === 0) continue;
+    const frag = buf.subarray(pos, pos + len);
+    pos += len;
+    if (type === 1) { out.push(frag); cur = []; }
+    else if (type === 2) cur = [frag];
+    else if (type === 3) cur.push(frag);
+    else if (type === 4) { cur.push(frag); out.push(Buffer.concat(cur)); cur = []; }
+  }
+  return out;
+}
+
+function parseWriteBatch(rec) { // WriteBatch → [[key, value], ...]
+  const items = [];
+  if (rec.length < 12) return items;
+  const count = rec.readUInt32LE(8);
+  let p = 12; // 跳过 8 字节 sequence + 4 字节 count
+  for (let i = 0; i < count && p < rec.length; i++) {
+    if (rec[p++] !== 1) break; // 只处理 kTypeValue
+    const [kl, p1] = readVarint(rec, p);
+    if (kl === null || p1 + kl > rec.length) break;
+    const [vl, p2] = readVarint(rec, p1 + kl);
+    if (vl === null || p2 + vl > rec.length) break;
+    items.push([rec.subarray(p1, p1 + kl).toString('utf8'),
+                rec.subarray(p2, p2 + vl).toString('utf8')]);
+    p = p2 + vl;
+  }
+  return items;
+}
+
+function readStorageFromDisk() { // 等价于 chrome.storage.local.get(null)，但不碰浏览器
+  if (!fs.existsSync(REAL_STORAGE)) throw new Error('找不到插件数据目录 ' + REAL_STORAGE);
+  const logs = fs.readdirSync(REAL_STORAGE)
+    .filter((f) => /^\d+\.log$/.test(f))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10)); // 编号升序：后写的覆盖先写的
+  if (!logs.length) throw new Error('插件目录里没有 .log 文件（可能刚从 .sst 恢复，重开一次 Edge 即可）');
+  const raw = {};
+  for (const f of logs) {
+    const buf = fs.readFileSync(path.join(REAL_STORAGE, f));
+    for (const rec of parseLogRecords(buf))
+      for (const [k, v] of parseWriteBatch(rec)) raw[k] = v;
+  }
+  const data = {};
+  for (const [k, v] of Object.entries(raw)) {
+    try { data[k] = JSON.parse(v); } catch { data[k] = v; } // 值统一是 JSON 编码
+  }
+  if (!data.fundList) throw new Error('数据库里没有 fundList（插件可能还没登录或没写过持仓）');
+  return data;
+}
 
 async function getBrowserWs() {
   for (let i = 0; i < 15; i++) {
@@ -172,15 +240,27 @@ function summarize(data) {
 }
 
 (async () => {
-  const wsUrl = await ensureEdge();
   const watch = process.argv.includes('--watch');
+  let fallbackWs = null;
+  const syncOnce = async () => {
+    try {
+      const d = readStorageFromDisk();
+      console.log('[直读] 已从插件数据库直接读取（未启动浏览器）');
+      return d;
+    } catch (e) {
+      console.warn('[直读] 失败: ' + e.message);
+      console.warn('[直读] 回退浏览器方案，要求 Edge 完全退出…');
+      if (!fallbackWs) fallbackWs = await ensureEdge();
+      return await dumpOnce(fallbackWs);
+    }
+  };
   do {
-    const data = await dumpOnce(wsUrl);
+    const data = await syncOnce();
     fs.writeFileSync(OUT, JSON.stringify(data, null, 2));
     summarize(data);
     if (watch) { console.log('\n--- 60 秒后刷新 (Ctrl+C 退出) ---'); await sleep(60000); }
   } while (watch);
-  if (OWNED && !watch) { // 用完即关：下次运行必然重新 seed，持仓才会真正更新
+  if (OWNED && !watch) { // 用完即关：下次运行必然重新 seed
     await shutdownAuto();
     await sleep(800);
   }
