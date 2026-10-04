@@ -21,3 +21,36 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# v2 local private data
+backups/
+持仓历史.json
+market-cache.json
+sector-cache.json
+sync-status.json
+持仓核对报告.md
+*.tmp
+index-cache.json
+
+# Background service private runtime files
+runtime/
+dist/
+desktop-settings.json
+local-runtime.json
+fetch-state.json
+后台刷新.log*
+settings.json
+refresh.lock
+
+# Credentials, local logs and session state
+.env
+.env.*
+*.pem
+*.key
+*.log
+*.log.*
+*.sqlite
+*.sqlite3
+*.db
+.cookies*
+.auth/

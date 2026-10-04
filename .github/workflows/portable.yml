@@ -1,0 +1,26 @@
+name: Build Windows portable package
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download matching Node license
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force runtime | Out-Null
+          $version = node -p 'process.version'
+          Invoke-WebRequest "https://raw.githubusercontent.com/nodejs/node/$version/LICENSE" -OutFile runtime/NODE-LICENSE.txt
+      - name: Build portable zip
+        shell: pwsh
+        run: ./build-portable.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yangjibao-windows-x64
+          path: dist/yangjibao-windows-x64.zip

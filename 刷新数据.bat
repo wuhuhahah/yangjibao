@@ -1,60 +1,17 @@
 @echo off
-setlocal enabledelayedexpansion
+chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
-title Ñø»ù±¦Êý¾ÝË¢ÐÂ
-
-echo ============================================
-echo   Ñø»ù±¦ ³Ö²ÖÍ¬²½ + ¿´°åË¢ÐÂ
-echo ============================================
-echo.
-
-set "NEED_RESTART=0"
-set "EDGE_X86=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
-set "EDGE_X64=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
-
-echo [1/2] Í¬²½²å¼þ³Ö²Ö...
-node yjb.js
-
+title å…»åŸºå®æŒä»“å·¥ä½œå°
+echo æ­£åœ¨è¯»å–æŒä»“å¹¶æ›´æ–°çœ‹æ¿...
+set "NODE_BIN=node"
+if exist "%~dp0runtime\node.exe" set "NODE_BIN=%~dp0runtime\node.exe"
+"%NODE_BIN%" refresh-job.js
 if errorlevel 1 (
-    echo.
-    echo [!] Ö±¶Á²å¼þÊý¾Ý¿âÊ§°Ü£¬ÐèÒª»ØÍËµ½ä¯ÀÀÆ÷·½°¸¡£
-    tasklist /FI "IMAGENAME eq msedge.exe" /NH 2>nul | find /I "msedge.exe" >nul
-    if !errorlevel! equ 0 (
-        echo     ä¯ÀÀÆ÷·½°¸ÒªÇóÏÈÍêÈ«¹Ø±Õ Edge£¬Ë¢ÐÂºó»á×Ô¶¯ÖØ¿ª¡£
-        echo     ÇëÏÈ±£´æÕýÔÚ±à¼­µÄÍøÒ³ÄÚÈÝ¡£
-        set /p "ANS=    ÏÖÔÚ¹Ø±Õ Edge ²¢ÖØÊÔ£¿[Y/n] "
-        if /I "!ANS:~0,1!"=="n" (
-            echo     ÒÑÌø¹ý£¬³Ö²ÖÑØÓÃÉÏ´ÎÊý¾Ý¡£
-        ) else (
-            echo     ÕýÔÚ¹Ø±Õ Edge...
-            taskkill /IM msedge.exe >nul 2>&1
-            ping -n 4 127.0.0.1 >nul
-            tasklist /FI "IMAGENAME eq msedge.exe" /NH 2>nul | find /I "msedge.exe" >nul
-            if !errorlevel! equ 0 taskkill /IM msedge.exe /F >nul 2>&1
-            set "NEED_RESTART=1"
-            node yjb.js
-        )
-    )
-) else (
-    echo     ³Ö²ÖÍ¬²½Íê³É¡£
+  echo çœ‹æ¿ç”Ÿæˆå¤±è´¥ï¼Œå·²ä¿ç•™ä¸Šæ¬¡çœ‹æ¿ã€‚è¯·æŸ¥çœ‹ä¸Šé¢çš„é”™è¯¯ä¿¡æ¯ã€‚
+  pause
+  exit /b 1
 )
-echo.
-
-echo [2/2] À­È¡¾»ÖµÓë¹ÀÖµ£¬Éú³É¿´°å£¨Ô¼ 1 ·ÖÖÓ£¬ÇëÉÔºò£©...
-py -3.13 portfolio.py
-echo.
-
-if "!NEED_RESTART!"=="1" (
-    echo ÖØÐÂ´ò¿ª Edge...
-    if exist "!EDGE_X86!" (
-        start "" "!EDGE_X86!"
-    ) else if exist "!EDGE_X64!" (
-        start "" "!EDGE_X64!"
-    ) else (
-        start "" msedge
-    )
-)
-
-start "" "%~dp0³Ö²Ö¿´°å.html"
-echo Íê³É¡£
-ping -n 4 127.0.0.1 >nul
+start "" "%~dp0æŒä»“çœ‹æ¿.html"
+echo å®Œæˆã€‚
+timeout /t 3 >nul
